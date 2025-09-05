@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Клеточные разбиения — замощение</title>
+<style>
+  html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial}
+  #app{height:100%;display:flex;flex-direction:column}
+  header{padding:10px;display:flex;gap:7px;align-items:center;background:#111;color:#fff;flex-wrap:wrap}
+  header button, header label{margin-left:6px}
+  #canvasWrap{flex:1;position:relative;background:#222}
+  canvas{display:block;width:100%;height:100%}
+  #info{position:absolute; left: 20px; bottom :20px; width: 300px; background:rgba(255,255,255,0.9);color:#000;padding:13px;border-radius:13px;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3)}
+  #info .close{position:absolute;right:6px;top:6px;cursor:pointer;font-size:16px;width:20px;height:20px;text-align:center;line-height:20px;border-radius:50%;background: none}
+  #info .close:hover{background:#ddd}
+  .small{font-size:12px;color:#666}
+  .tile-nav{position:absolute;top:10px;font-size:24px;cursor:pointer;user-select:none;color:#fff;}
+  #prevTile{left:10px;}
+  #nextTile{right:10px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div><h2><strong>Клеточное замощение</strong></h2></div>
+   
+    <button id="clearTiles">🗑️ Верх</button>
+    <button id="clearRegion">🗑️ Низ</button>
+    <button id="addTile">+ Плитка</button>
+    <label><input type="checkbox" id="requireAllTiles">Все плитки участвуют</label>
+    <label><input type="checkbox" id="allowReflect">С отраженими</label>
+    <label class="small"></label>
+    <button id="countBtn">Число разбиений</button>
+    <span id="status" class="small"></span>
+  </header>
+  <div id="canvasWrap">
+    <canvas id="c"></canvas>
+    <div id="prevTile" class="tile-nav">⬅️</div>
+    <div id="nextTile" class="tile-nav">➡️</div>
+    <div id="info">
+      <div class="close" id="closeInfo"></div>
+      <div class="small">Задайте плитки сверху и фигуру снизу для нахождения числа разбиений</div>
+      <div>Верхние фигуры: <span id="tileCells">0</span> клеток</div>
+      <div>Нижняя фигура: <span id="regionCells">0</span> клеток</div>
+      <div>Размер поля: <span id="gridSize">18 × 28</span></div>
+      <div><span id="mode"></span></div>
+      <div>Число разбиений: <span id="result"></span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const COLS = 18;
+const ROWS = 28;
+const TOP_RATIO = 0.25;
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const wrap = document.getElementById('canvasWrap');
+
+let allowReflect = document.getElementById('allowReflect');
+let requireAllTiles = document.getElementById('requireAllTiles');
+let tileCellsSpan = document.getElementById('tileCells');
+let regionCellsSpan = document.getElementById('regionCells');
+let resultSpan = document.getElementById('result');
+let statusSpan = document.getElementById('status');
+
+let tiles = [Array.from({length: Math.floor(ROWS*TOP_RATIO)},()=>Array(COLS).fill(false))];
+let region = Array.from({length: ROWS - Math.floor(ROWS*TOP_RATIO)},()=>Array(COLS).fill(false));
+let currentTileIndex = 0;
+let solutionExample = [];
+
+const prevTileBtn = document.getElementById('prevTile');
+const nextTileBtn = document.getElementById('nextTile');
+
+function updateNavButtons(){
+  prevTileBtn.style.display = currentTileIndex > 0 ? 'block' : 'none';
+  nextTileBtn.style.display = currentTileIndex < tiles.length-1 ? 'block' : 'none';
+}
+
+prevTileBtn.addEventListener('click', ()=>{
+  if(currentTileIndex > 0){
+    currentTileIndex--;
+    draw();
+    updateNavButtons();
+  }
+});
+
+nextTileBtn.addEventListener('click', ()=>{
+  if(currentTileIndex < tiles.length-1){
+    currentTileIndex++;
+    draw();
+    updateNavButtons();
+  }
+});
+
+function resize(){
+  canvas.width = wrap.clientWidth * devicePixelRatio;
+  canvas.height = wrap.clientHeight * devicePixelRatio;
+  canvas.style.width = wrap.clientWidth + 'px';
+  canvas.style.height = wrap.clientHeight + 'px';
+  draw();
+  updateNavButtons();
+}
+window.addEventListener('resize', resize);
+resize();
+
+function draw(){
+  const w = canvas.width; const h = canvas.height; const d = devicePixelRatio;
+  ctx.clearRect(0,0,w,h);
+  const cellH = h / ROWS; const cellW = w / COLS;
+  const topRows = Math.floor(ROWS*TOP_RATIO);
+
+  ctx.fillStyle = '#1e1e1e';
+  ctx.fillRect(0,0,w,h);
+
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const x = c*cellW; const y = r*cellH;
+      if(r < topRows){
+        if(tiles[currentTileIndex][r][c]){ ctx.fillStyle = '#ffcc66'; ctx.fillRect(x,y,cellW,cellH); }
+      } else {
+        if(region[r-topRows][c]){ ctx.fillStyle = '#66ccff'; ctx.fillRect(x,y,cellW,cellH); }
+      }
+      ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1*d;
+      ctx.strokeRect(x+0.5*d, y+0.5*d, cellW- d, cellH- d);
+    }
+  }
+
+  const colors = ['#ff6b6b', '#45b7d1', '#f9c74f', '#90be6d', '#f8961e', '#7209b7', '#f94144', '#4eddc4', '#999999', '#a07020', '#eeeeee', '#ff00bb'];
+  solutionExample.forEach((placement, index) => {
+    ctx.fillStyle = colors[index % colors.length];
+    for(let [rr,cc] of placement){
+      const x = cc*cellW; const y = (rr+topRows)*cellH;
+      ctx.fillRect(x,y,cellW,cellH);
+    }
+  });
+
+  const borderY = topRows * cellH;
+  ctx.strokeStyle = '#ff9900';
+  ctx.lineWidth = 2*d;
+  ctx.beginPath();
+  ctx.moveTo(0, borderY + 0.5*d);
+  ctx.lineTo(w, borderY + 0.5*d);
+  ctx.stroke();
+}
+
+// остальные обработчики из оригинального кода без изменений...
+
+canvas.addEventListener('pointerdown', e=>{
+  const {r,c} = screenToCell(e.clientX, e.clientY);
+  if(r<0||r>=ROWS||c<0||c>=COLS) return;
+  const topRows = Math.floor(ROWS*TOP_RATIO);
+  if(r < topRows){
+    tiles[currentTileIndex][r][c] = !tiles[currentTileIndex][r][c];
+    tileCellsSpan.textContent = countTileCells();
+  }
+  else {
+    if(solutionExample.length>0){ solutionExample = []; }
+    region[r-topRows][c] = !region[r-topRows][c];
+    regionCellsSpan.textContent = countRegionCells();
+  }
+  draw();
+});
+
+function screenToCell(clientX, clientY){
+  const rect = canvas.getBoundingClientRect();
+  const x = (clientX - rect.left) * (canvas.width / rect.width);
+  const y = (clientY - rect.top) * (canvas.height / rect.height);
+  const c = Math.floor(x / (canvas.width / COLS));
+  const r = Math.floor(y / (canvas.height / ROWS));
+  return {r,c};
+}
+
+function countTileCells(){
+  let s=0; for(let t of tiles) for(let r=0;r<t.length;r++) for(let c=0;c<t[0].length;c++) if(t[r][c]) s++; return s;
+}
+function countRegionCells(){
+  let s=0; for(let r=0;r<region.length;r++) for(let c=0;c<region[0].length;c++) if(region[r][c]) s++; return s;
+}
+
+document.getElementById('addTile').addEventListener('click', ()=>{
+  tiles.push(Array.from({length: Math.floor(ROWS*TOP_RATIO)},()=>Array(COLS).fill(false)));
+  currentTileIndex = tiles.length-1;
+  draw();
+  updateNavButtons();
+});
+
+document.getElementById('clearTiles').addEventListener('click', ()=>{
+  tiles = [Array.from({length: Math.floor(ROWS*TOP_RATIO)},()=>Array(COLS).fill(false))];
+  currentTileIndex=0;
+  tileCellsSpan.textContent='0';
+  draw();
+  updateNavButtons();
+});
+
+document.getElementById('clearRegion').addEventListener('click', ()=>{
+  for(let r=0;r<region.length;r++) region[r].fill(false);
+  regionCellsSpan.textContent='0'; resultSpan.textContent='—'; solutionExample=[]; draw();
+});
+
+// ... оставшиеся функции подсчета и генерации без изменений ...
+
+function extractTileCoords(tile){
+  const coords = [];
+  for(let r=0;r<tile.length;r++) for(let c=0;c<tile[0].length;c++) if(tile[r][c]) coords.push([r,c]);
+  if(coords.length===0) return [];
+  let minR = Math.min(...coords.map(x=>x[0]));
+  let minC = Math.min(...coords.map(x=>x[1]));
+  return coords.map(([r,c])=>[r-minR, c-minC]);
+}
+
+function normalize(coords){
+  if(coords.length===0) return [];
+  let minR = Math.min(...coords.map(x=>x[0]));
+  let minC = Math.min(...coords.map(x=>x[1]));
+  return coords.map(([r,c])=>[r-minR, c-minC]).sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+}
+
+function coordsToKey(coords){ return coords.map(c=>c.join(',')).join(';'); }
+function rotate90(coords){ return coords.map(([r,c])=>[c, -r]); }
+function reflect(coords){ return coords.map(([r,c])=>[r, -c]); }
+
+function generateVariants(coords, allowReflectFlag){
+  if(coords.length===0) return [];
+  let variants = [];
+  let base = coords.map(([r,c])=>[r,c]);
+  for(let k=0;k<4;k++){
+    let norm = normalize(base);
+    variants.push(norm);
+    if(allowReflectFlag){
+      let refl = normalize(reflect(base));
+      variants.push(refl);
+    }
+    base = rotate90(base);
+  }
+  const uniq = [];
+  const seen = new Set();
+  for(let v of variants){ const k = coordsToKey(v); if(!seen.has(k)){ seen.add(k); uniq.push(v); } }
+  return uniq;
+}
+
+function generatePlacements(tileCoords, allowReflectFlag){
+  const variants = generateVariants(tileCoords, allowReflectFlag);
+  const placements = [];
+  const R = region.length, C = region[0].length;
+  const regionCellsList = [];
+  for(let r=0;r<R;r++) for(let c=0;c<C;c++) if(region[r][c]) regionCellsList.push([r,c]);
+  const regionSet = new Set(regionCellsList.map(x=>x.join(',')));
+  for(let v of variants){
+    const maxR = Math.max(...v.map(x=>x[0]));
+    const maxC = Math.max(...v.map(x=>x[1]));
+    for(let or=0; or<=R- (maxR+1); or++){
+      for(let oc=0; oc<=C- (maxC+1); oc++){
+        const cells = v.map(([r,c])=>[r+or, c+oc]);
+        let ok = true;
+        for(let [rr,cc] of cells) if(!regionSet.has(rr+','+cc)){ ok=false; break; }
+        if(ok){ placements.push({cells, tileKey: coordsToKey(tileCoords)}); }
+      }
+    }
+  }
+  return placements;
+}
+
+function countExactCovers(allPlacements, targetCells, requireAllTilesFlag, tileKeys){
+  const cols = targetCells;
+  const colIndex = new Map(); cols.forEach((c,i)=>colIndex.set(c, i));
+  const rows = allPlacements.map(p => p.cells.map(([r,c])=>colIndex.get(r+','+c)));
+  const rowTileKeys = allPlacements.map(p => p.tileKey);
+  const colToRows = Array.from({length:cols.length},()=>[]);
+  for(let i=0;i<rows.length;i++) for(let j of rows[i]) colToRows[j].push(i);
+
+  let usedRow = Array(rows.length).fill(false);
+  let usedCol = Array(cols.length).fill(false);
+  let solutionCount = 0;
+  let example = [];
+
+  function chooseColumn(){
+    let best = -1; let bestCnt = Infinity;
+    for(let c=0;c<cols.length;c++) if(!usedCol[c]){
+      let cnt = 0;
+      for(let r of colToRows[c]) if(!usedRow[r]) cnt++;
+      if(cnt===0) return c;
+      if(cnt < bestCnt){ bestCnt = cnt; best = c; }
+    }
+    return best;
+  }
+
+  function coverRow(row){
+    usedRow[row] = true;
+    for(let c of rows[row]) usedCol[c] = true;
+    const marked = [];
+    for(let c of rows[row]){
+      for(let r of colToRows[c]) if(!usedRow[r]){ usedRow[r] = true; marked.push(r); }
+    }
+    return marked;
+  }
+  function uncoverRow(row, marked){
+    for(let r of marked) usedRow[r] = false;
+    usedRow[row] = false;
+    for(let c of rows[row]) usedCol[c] = false;
+  }
+
+  function search(coveredCount, sol, usedTileKeys){
+    if(coveredCount === cols.length){
+      if(!requireAllTilesFlag || tileKeys.every(k=>usedTileKeys.has(k))){
+        solutionCount++;
+        if(example.length===0) example = sol.map(idx=>allPlacements[idx].cells);
+      }
+      return;
+    }
+    const c = chooseColumn();
+    let possibleRows = [];
+    for(let r of colToRows[c]) if(!usedRow[r]) possibleRows.push(r);
+    if(possibleRows.length===0) return;
+    for(let r of possibleRows){
+      const marked = coverRow(r);
+      const newUsedTileKeys = new Set(usedTileKeys);
+      newUsedTileKeys.add(rowTileKeys[r]);
+      search(coveredCount + rows[r].length, sol.concat([r]), newUsedTileKeys);
+      uncoverRow(r, marked);
+    }
+  }
+
+  if(allPlacements.length===0) return [0, []];
+  search(0, [], new Set());
+  return [solutionCount, example];
+}
+
+document.getElementById('countBtn').addEventListener('click', async ()=>{
+  statusSpan.textContent = 'Генерация вариантов...';
+  await new Promise(r=>setTimeout(r,50));
+  const tileCoordsList = tiles.map(t=>extractTileCoords(t)).filter(tc=>tc.length>0);
+  if(tileCoordsList.length===0){ alert('Плитки пусты — задайте верхние фигуры'); return; }
+  const regionCoords = [];
+  for(let r=0;r<region.length;r++) for(let c=0;c<region[0].length;c++) if(region[r][c]) regionCoords.push(r+','+c);
+  if(regionCoords.length===0){ alert('Область пуста — задайте нижнюю фигуру'); return; }
+
+  let allPlacements = [];
+  for(let tc of tileCoordsList){ allPlacements.push(...generatePlacements(tc, allowReflect.checked)); }
+
+  const tileKeys = tileCoordsList.map(coordsToKey);
+
+  statusSpan.textContent = 'Подсчёт...';
+  await new Promise(r=>setTimeout(r,50));
+  const [cnt, example] = countExactCovers(allPlacements, regionCoords, requireAllTiles.checked, tileKeys);
+  resultSpan.textContent = String(cnt);
+  solutionExample = example;
+  statusSpan.textContent = '';
+  draw();
+});
+
+document.getElementById('closeInfo').addEventListener('click', function() {
+  const info = document.getElementById('info');
+  info.style.display = info.style.display === 'none' ? 'block' : 'none';
+});
+
+tileCellsSpan.textContent = countTileCells();
+regionCellsSpan.textContent = countRegionCells();
+
+</script>
+</body>
+  </html>
